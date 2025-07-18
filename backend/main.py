@@ -112,6 +112,8 @@ class SavedJob(BaseModel):
     job_data: Dict[str, Any]
     notes: str
     saved_at: str
+    applied: bool = False  # New field to track application status
+    applied_at: Optional[str] = None  # When the job was applied to
     tags: List[str] = []
 
 class SavedJobResponse(BaseModel):
@@ -133,7 +135,15 @@ def load_saved_jobs() -> List[SavedJob]:
         if os.path.exists(SAVED_JOBS_FILE):
             with open(SAVED_JOBS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return [SavedJob(**job) for job in data]
+                saved_jobs = []
+                for job_data in data:
+                    # Handle backward compatibility for existing jobs without applied status
+                    if 'applied' not in job_data:
+                        job_data['applied'] = False
+                    if 'applied_at' not in job_data:
+                        job_data['applied_at'] = None
+                    saved_jobs.append(SavedJob(**job_data))
+                return saved_jobs
         return []
     except Exception as e:
         print(f"Error loading saved jobs: {e}")
@@ -715,6 +725,84 @@ async def update_job_notes(job_id: str, notes: str):
         raise HTTPException(
             status_code=500,
             detail=f"Error updating job notes: {str(e)}"
+        )
+
+@app.put("/saved-job/{job_id}/applied")
+async def mark_job_applied(job_id: str, applied: bool):
+    """Mark a saved job as applied or not applied"""
+    try:
+        saved_jobs = load_saved_jobs()
+        
+        # Find and update the job
+        job_found = False
+        for job in saved_jobs:
+            if job.id == job_id:
+                job.applied = applied
+                job.applied_at = datetime.now().isoformat() if applied else None
+                job_found = True
+                break
+        
+        if not job_found:
+            raise HTTPException(
+                status_code=404,
+                detail="Saved job not found"
+            )
+        
+        # Save updated list
+        save_jobs_to_file(saved_jobs)
+        
+        status_text = "applied to" if applied else "marked as not applied"
+        
+        return {
+            "success": True,
+            "message": f"Job {status_text} successfully",
+            "applied": applied,
+            "applied_at": job.applied_at if applied else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating job application status: {str(e)}"
+        )
+
+@app.get("/saved-jobs/categorized")
+async def get_saved_jobs_categorized():
+    """Get saved jobs organized by application status"""
+    try:
+        saved_jobs = load_saved_jobs()
+        
+        # Sort by saved_at date (newest first)
+        saved_jobs.sort(key=lambda x: x.saved_at, reverse=True)
+        
+        # Categorize jobs
+        saved_not_applied = [job for job in saved_jobs if not job.applied]
+        applied_jobs = [job for job in saved_jobs if job.applied]
+        
+        # Sort applied jobs by applied_at date (newest first)
+        applied_jobs.sort(key=lambda x: x.applied_at or x.saved_at, reverse=True)
+        
+        return {
+            "success": True,
+            "message": f"Retrieved {len(saved_jobs)} saved jobs",
+            "saved_jobs": {
+                "saved_not_applied": saved_not_applied,
+                "applied": applied_jobs
+            },
+            "counts": {
+                "total": len(saved_jobs),
+                "saved_not_applied": len(saved_not_applied),
+                "applied": len(applied_jobs)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving categorized saved jobs: {str(e)}"
         )
 
 @app.get("/health")

@@ -528,10 +528,18 @@
         .saved-job-meta {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
+            align-items: flex-start;
+            margin-bottom: 15px;
             font-size: 0.9rem;
             color: #666;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .saved-job-meta > div:first-child {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .saved-date {
@@ -541,6 +549,8 @@
         .saved-actions {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
         }
 
         .remove-job-btn {
@@ -1011,11 +1021,10 @@
                         ` : ''}
                         
                         <div class="job-links">
-                            ${job.job_url ? `<a href="${job.job_url}" target="_blank" class="job-link">View Job</a>` : ''}
+                            ${job.job_url_direct ? `<a href="${job.job_url_direct}" target="_blank" class="job-link">View Job</a>` : (job.job_url ? `<a href="${job.job_url}" target="_blank" class="job-link">View Job</a>` : '')}
                             ${job.company_url ? `<a href="${job.company_url}" target="_blank" class="job-link">Company Page</a>` : ''}
-                            <button onclick="handleSaveJob(${index})" class="save-job-btn" id="save-btn-${index}">
-                                💾 Save Job
-                            </button>
+                            <button onclick="handleSaveJob(${index})" class="save-job-btn" id="save-btn-${index}">💾 Save Job</button>
+                            ${job.description ? `<button class="job-link" onclick="openDescriptionModal(${index})" type="button">📄 View Description</button>` : ''}
                         </div>
                     </div>
                 `;
@@ -1356,8 +1365,28 @@
                 
                 if (result.success) {
                     savedJobs = result.saved_jobs;
-                    displaySavedJobs(result);
-                    updateSavedCount();
+                    
+                    // Categorize jobs on frontend
+                    const savedNotApplied = savedJobs.filter(job => !job.applied);
+                    const appliedJobs = savedJobs.filter(job => job.applied);
+                    
+                    const categorizedResult = {
+                        success: true,
+                        message: result.message,
+                        saved_jobs: {
+                            saved_not_applied: savedNotApplied,
+                            applied: appliedJobs
+                        },
+                        counts: {
+                            total: savedJobs.length,
+                            saved_not_applied: savedNotApplied.length,
+                            applied: appliedJobs.length
+                        },
+                        timestamp: result.timestamp
+                    };
+                    
+                    displayCategorizedSavedJobs(categorizedResult);
+                    updateSavedCount(categorizedResult.counts.total);
                 } else {
                     document.getElementById('saved-jobs-container').innerHTML = `
                         <div class="error">Failed to load saved jobs: ${result.message}</div>
@@ -1371,13 +1400,17 @@
             }
         }
 
-        function displaySavedJobs(result) {
+        function displayCategorizedSavedJobs(result) {
             const container = document.getElementById('saved-jobs-container');
             const countElement = document.getElementById('saved-jobs-count');
             
-            countElement.textContent = `${result.total_count} saved jobs`;
+            const totalCount = result.counts.total;
+            const savedCount = result.counts.saved_not_applied;
+            const appliedCount = result.counts.applied;
             
-            if (result.total_count === 0) {
+            countElement.textContent = `${totalCount} total jobs (${savedCount} saved, ${appliedCount} applied)`;
+            
+            if (totalCount === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">📋</div>
@@ -1388,74 +1421,135 @@
                 return;
             }
 
-            let html = '<div class="saved-jobs-list">';
+            let html = '<div class="categorized-jobs">';
             
-            result.saved_jobs.forEach(savedJob => {
-                const job = savedJob.job_data;
-                const savedDate = new Date(savedJob.saved_at).toLocaleDateString();
-                
-                html += `
-                    <div class="saved-job-card">
-                        <div class="saved-job-meta">
-                            <span class="saved-date">Saved on ${savedDate}</span>
-                            <div class="saved-actions">
-                                <button onclick="deleteSavedJob('${savedJob.id}')" class="remove-job-btn">
-                                    🗑️ Remove
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="job-header">
-                            <div>
-                                <div class="job-title">${escapeHtml(job.title || 'N/A')}</div>
-                                <div class="job-company">${escapeHtml(job.company || 'N/A')}</div>
-                            </div>
-                        </div>
-
-                        <div class="job-details">
-                            <div class="job-detail">
-                                <strong>Location:</strong> ${escapeHtml(job.location || 'Not specified')}
-                            </div>
-                            <div class="job-detail">
-                                <strong>Job Type:</strong> ${escapeHtml(job.job_type || 'Not specified')}
-                            </div>
-                            <div class="job-detail">
-                                <strong>Salary:</strong> ${formatSalary(job)}
-                            </div>
-                            <div class="job-detail">
-                                <strong>Site:</strong> ${escapeHtml(job.site || 'N/A')}
-                            </div>
-                        </div>
-
-                        ${job.description ? `
-                            <div class="job-description">
-                                <strong>Description:</strong><br>
-                                ${truncateDescription(job.description)}
-                            </div>
-                        ` : ''}
-
-                        <div class="job-links">
-                            ${job.job_url ? `<a href="${job.job_url}" target="_blank" class="job-link">View Job</a>` : ''}
-                            ${job.company_url ? `<a href="${job.company_url}" target="_blank" class="job-link">Company Page</a>` : ''}
-                        </div>
-
-                        ${savedJob.notes ? `
-                            <div class="notes-section">
-                                <strong>Notes:</strong><br>
-                                ${escapeHtml(savedJob.notes)}
-                            </div>
-                        ` : ''}
-                    </div>
-                `;
-            });
+            // Saved Jobs Section (Not Applied)
+            html += `
+                <div class="job-category">
+                    <h3 style="color: #48bb78; border-bottom: 2px solid #48bb78; padding-bottom: 10px; margin-bottom: 20px;">
+                        💾 Saved Jobs (${savedCount})
+                    </h3>
+            `;
             
-            html += '</div>';
+            if (savedCount === 0) {
+                html += `<div style="text-align: center; color: #666; padding: 20px; font-style: italic;">No saved jobs waiting for application</div>`;
+            } else {
+                result.saved_jobs.saved_not_applied.forEach(savedJob => {
+                    html += renderSavedJobCard(savedJob, 'saved');
+                });
+            }
+            
+            html += `</div>`; // End saved jobs section
+            
+            // Applied Jobs Section
+            html += `
+                <div class="job-category" style="margin-top: 40px;">
+                    <h3 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 10px; margin-bottom: 20px;">
+                        ✅ Applied Jobs (${appliedCount})
+                    </h3>
+            `;
+            
+            if (appliedCount === 0) {
+                html += `<div style="text-align: center; color: #666; padding: 20px; font-style: italic;">No jobs applied to yet</div>`;
+            } else {
+                result.saved_jobs.applied.forEach(savedJob => {
+                    html += renderSavedJobCard(savedJob, 'applied');
+                });
+            }
+            
+            html += `</div>`; // End applied jobs section
+            html += '</div>'; // End categorized jobs
             container.innerHTML = html;
         }
 
-        function updateSavedCount() {
+        function renderSavedJobCard(savedJob, category) {
+            const job = savedJob.job_data;
+            const savedDate = new Date(savedJob.saved_at).toLocaleDateString();
+            const appliedDate = savedJob.applied_at ? new Date(savedJob.applied_at).toLocaleDateString() : null;
+            
+            const statusIndicator = category === 'applied' 
+                ? `<div style="background: #c6f6d5; color: #22543d; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">✅ Applied ${appliedDate ? `on ${appliedDate}` : ''}</div>`
+                : `<div style="background: #fed7d7; color: #742a2a; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">⏳ Not Applied</div>`;
+            
+            const actionButton = category === 'applied'
+                ? `<button onclick="markJobStatus('${savedJob.id}', false)" class="job-link" style="background: #e53e3e;">Mark as Not Applied</button>`
+                : `<button onclick="markJobStatus('${savedJob.id}', true)" class="job-link" style="background: #48bb78;">Mark as Applied</button>`;
+            
+            return `
+                <div class="saved-job-card" style="border-left-color: ${category === 'applied' ? '#667eea' : '#48bb78'};">
+                    <div class="saved-job-meta">
+                        <div>
+                            <span class="saved-date">Saved on ${savedDate}</span>
+                            ${statusIndicator}
+                        </div>
+                        <div class="saved-actions">
+                            ${actionButton}
+                            <button onclick="deleteSavedJob('${savedJob.id}')" class="remove-job-btn">🗑️ Remove</button>
+                        </div>
+                    </div>
+                    
+                    <div class="job-header">
+                        <div>
+                            <div class="job-title">${escapeHtml(job.title || 'N/A')}</div>
+                            <div class="job-company">${escapeHtml(job.company || 'N/A')}</div>
+                        </div>
+                    </div>
+
+                    <div class="job-details">
+                        <div class="job-detail"><strong>Location:</strong> ${escapeHtml(job.location || 'Not specified')}</div>
+                        <div class="job-detail"><strong>Job Type:</strong> ${escapeHtml(job.job_type || 'Not specified')}</div>
+                        <div class="job-detail"><strong>Salary:</strong> ${formatSalary(job)}</div>
+                        <div class="job-detail"><strong>Site:</strong> ${escapeHtml(job.site || 'N/A')}</div>
+                    </div>
+
+                    ${job.description ? `
+                        <div class="job-description">
+                            <strong>Description:</strong><br>
+                            ${truncateDescription(job.description)}
+                        </div>
+                    ` : ''}
+
+                    <div class="job-links">
+                        ${job.job_url_direct ? `<a href="${job.job_url_direct}" target="_blank" class="job-link">Apply Now</a>` : (job.job_url ? `<a href="${job.job_url}" target="_blank" class="job-link">View Job</a>` : '')}
+                        ${job.company_url ? `<a href="${job.company_url}" target="_blank" class="job-link">Company Page</a>` : ''}
+                    </div>
+
+                    ${savedJob.notes ? `
+                        <div class="notes-section">
+                            <strong>Notes:</strong><br>
+                            ${escapeHtml(savedJob.notes)}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function updateSavedCount(count = null) {
             const countElement = document.getElementById('saved-count');
-            countElement.textContent = savedJobs.length;
+            countElement.textContent = count !== null ? count : savedJobs.length;
+        }
+
+        async function markJobStatus(jobId, applied) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/saved-job/${jobId}/applied?applied=${applied}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Reload saved jobs to update the display
+                    await loadSavedJobs();
+                } else {
+                    alert('Failed to update job status: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error updating job status:', error);
+                alert('Failed to update job status. Please try again.');
+            }
         }
 
         async function handleSaveJob(jobIndex) {
@@ -1561,6 +1655,65 @@
                 `;
             }
         });
+    </script>
+    <!-- Add modal HTML if not present -->
+    <div id="description-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeDescriptionModal()">&times;</button>
+            <h2 id="modal-job-title"></h2>
+            <h3 id="modal-job-company" style="color:#667eea;"></h3>
+            <div id="modal-job-description" style="margin-top:20px;"></div>
+        </div>
+    </div>
+    <!-- Modal CSS -->
+    <style>
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: #fff;
+            border-radius: 10px;
+            max-width: 600px;
+            width: 90%;
+            padding: 30px 30px 20px 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            position: relative;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 2rem;
+            color: #667eea;
+            cursor: pointer;
+        }
+        @media (max-width: 700px) {
+            .modal-content { padding: 15px; }
+        }
+    </style>
+    <!-- Modal JS -->
+    <script>
+        // Modal JS
+        window.openDescriptionModal = function(index) {
+            const job = currentJobs[index];
+            document.getElementById('modal-job-title').textContent = job.title || '';
+            document.getElementById('modal-job-company').textContent = job.company || '';
+            document.getElementById('modal-job-description').innerHTML = job.description ? job.description : '<em>No description available.</em>';
+            document.getElementById('description-modal').style.display = 'flex';
+        }
+        window.closeDescriptionModal = function() {
+            document.getElementById('description-modal').style.display = 'none';
+        }
     </script>
 </body>
 </html> 
