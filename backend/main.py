@@ -29,13 +29,13 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 if OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here":
     try:
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
-        print("✅ OpenAI client initialized for AI filtering")
+        print("OpenAI client initialized for AI filtering")
     except Exception as e:
-        print(f"⚠️ Failed to initialize OpenAI client: {e}")
+        print(f"Failed to initialize OpenAI client: {e}")
         openai_client = None
 else:
-    print("⚠️ OpenAI API key not found or not configured. AI filtering will not be available.")
-    print("💡 To enable AI features, add your OpenAI API key to .env file")
+    print("OpenAI API key not found or not configured. AI filtering will not be available.")
+    print("To enable AI features, add your OpenAI API key to .env file")
 
 app = FastAPI(
     title="JobSpy API with AI Filtering",
@@ -168,7 +168,7 @@ def filter_jobs_by_company(jobs_df, company_filter):
     company_filter_clean = company_filter.lower().strip()
     
     print("--- Simplified Company Filtering ---")
-    print(f"🎯 Filtering for companies that start with: '{company_filter_clean}'")
+    print(f"[TARGET] Filtering for companies that start with: '{company_filter_clean}'")
 
     # This prevents errors if the 'company' column contains non-string data
     jobs_df['company'] = jobs_df['company'].astype(str)
@@ -177,7 +177,7 @@ def filter_jobs_by_company(jobs_df, company_filter):
     
     filtered_df = jobs_df[mask].copy()
     
-    print(f"📊 Before: {len(jobs_df)} jobs. After: {len(filtered_df)} jobs.")
+    print(f"[RESULTS] Before: {len(jobs_df)} jobs. After: {len(filtered_df)} jobs.")
     print("---------------------------------")
     return filtered_df
 
@@ -189,9 +189,9 @@ async def search_jobs(request: JobSearchRequest):
         actual_search_term = request.search_term
         if request.company_filter and request.company_filter.strip():
             actual_search_term = f"{request.search_term} {request.company_filter}".strip()
-            print(f"🔍 Company filter provided: '{request.company_filter}' - will filter results")
+            print(f"[SEARCH] Company filter provided: '{request.company_filter}' - will filter results")
         else:
-            print("🔍 No company filter - will show all companies")
+            print("[SEARCH] No company filter - will show all companies")
         
         # Prepare parameters for JobSpy
         search_params = {
@@ -214,26 +214,26 @@ async def search_jobs(request: JobSearchRequest):
         search_params = {k: v for k, v in search_params.items() if v is not None}
         
         # Debug: Print exact parameters being sent to JobSpy
-        print(f"🔍 Original search term: '{request.search_term}'")
-        print(f"🏢 Company filter: '{request.company_filter}'")
-        print(f"🔍 Actual search term sent to JobSpy: '{actual_search_term}'")
-        print(f"📋 JobSpy Parameters: {search_params}")
+        print(f"[SEARCH] Original search term: '{request.search_term}'")
+        print(f"[COMPANY] Company filter: '{request.company_filter}'")
+        print(f"[SEARCH] Actual search term sent to JobSpy: '{actual_search_term}'")
+        print(f"[PARAMS] JobSpy Parameters: {search_params}")
         
         # Call JobSpy
         jobs_df = scrape_jobs(**search_params)
         
         # Debug: Print initial result info
         if jobs_df is not None and not jobs_df.empty:
-            print(f"✅ JobSpy returned {len(jobs_df)} jobs initially")
+            print(f"[SUCCESS] JobSpy returned {len(jobs_df)} jobs initially")
             
             # Apply company filter if specified
             if request.company_filter and request.company_filter.strip():
                 jobs_df = filter_jobs_by_company(jobs_df, request.company_filter)
             
-            print(f"📊 Final job count after filtering: {len(jobs_df)}")
-            print(f"📊 Columns: {list(jobs_df.columns)}")
+            print(f"[RESULTS] Final job count after filtering: {len(jobs_df)}")
+            print(f"[RESULTS] Columns: {list(jobs_df.columns)}")
         else:
-            print("❌ JobSpy returned no results")
+            print("[ERROR] JobSpy returned no results")
         
         # Convert DataFrame to list of dictionaries
         if jobs_df is not None and not jobs_df.empty:
@@ -438,10 +438,10 @@ async def ai_filter_jobs(request: AIFilterRequest, http_request: Request):
                 timestamp=start_time.isoformat()
             )
         
-        print(f"🤖 Starting AI analysis of {original_count} jobs...")
-        print(f"📝 Analysis prompt: {request.analysis_prompt}")
+        print(f"[AI] Starting AI analysis of {original_count} jobs...")
+        print(f"[PROMPT] Analysis prompt: {request.analysis_prompt}")
         if request.filter_criteria:
-            print(f"🔍 Filter criteria: {request.filter_criteria}")
+            print(f"[FILTER] Filter criteria: {request.filter_criteria}")
         
         # Step 1: Analyze each job with AI
         analysis_tasks = [
@@ -462,14 +462,14 @@ async def ai_filter_jobs(request: AIFilterRequest, http_request: Request):
             if i + batch_size < len(analysis_tasks):
                 await asyncio.sleep(1)
         
-        print(f"✅ Completed analysis of {len(analyzed_jobs)} jobs")
+        print(f"[SUCCESS] Completed analysis of {len(analyzed_jobs)} jobs")
         
         # Step 2: Apply filtering if criteria provided
         filtered_jobs = None
         filtered_count = None
         
         if request.filter_criteria:
-            print("🔍 Applying AI filtering...")
+            print("[FILTER] Applying AI filtering...")
             analyzed_jobs = await filter_jobs_with_ai(analyzed_jobs, request.filter_criteria, client)
             
             # Extract jobs that meet criteria
@@ -486,7 +486,7 @@ async def ai_filter_jobs(request: AIFilterRequest, http_request: Request):
                 filtered_jobs = []
                 filtered_count = 0
             
-            print(f"🎯 Filtered to {filtered_count} jobs meeting criteria")
+            print(f"[TARGET] Filtered to {filtered_count} jobs meeting criteria")
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
@@ -517,7 +517,7 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
-    print(f"🚀 Starting JobSpy API server on {BACKEND_HOST}:{BACKEND_PORT}")
-    print(f"📚 API Documentation: http://localhost:{BACKEND_PORT}/docs")
-    print(f"🔍 Health Check: http://localhost:{BACKEND_PORT}/health")
+    print(f"[STARTUP] Starting JobSpy API server on {BACKEND_HOST}:{BACKEND_PORT}")
+    print(f"[DOCS] API Documentation: http://localhost:{BACKEND_PORT}/docs")
+    print(f"[HEALTH] Health Check: http://localhost:{BACKEND_PORT}/health")
     uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT, log_level="info" if DEBUG else "warning") 
