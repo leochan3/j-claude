@@ -1343,9 +1343,9 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Reload saved jobs
+                    // Reload saved jobs and update save button states
                     await loadSavedJobs();
-                    updateSavedCount();
+                    updateSaveButtonStates();
                     return true;
                 } else {
                     alert('Failed to remove job from saved list.');
@@ -1387,6 +1387,7 @@
                     
                     displayCategorizedSavedJobs(categorizedResult);
                     updateSavedCount(categorizedResult.counts.total);
+                    updateSaveButtonStates(); // Always update save button states after loading
                 } else {
                     document.getElementById('saved-jobs-container').innerHTML = `
                         <div class="error">Failed to load saved jobs: ${result.message}</div>
@@ -1531,7 +1532,9 @@
 
         async function markJobStatus(jobId, applied) {
             try {
-                const response = await fetch(`${API_BASE_URL}/saved-job/${jobId}/applied?applied=${applied}`, {
+                // Ensure boolean is sent as true/false, not string
+                const boolValue = applied ? 'true' : 'false';
+                const response = await fetch(`${API_BASE_URL}/saved-job/${jobId}/applied?applied=${boolValue}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1541,10 +1544,11 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Reload saved jobs to update the display
+                    // Reload saved jobs and update save button states
                     await loadSavedJobs();
+                    updateSaveButtonStates();
                 } else {
-                    alert('Failed to update job status: ' + result.message);
+                    alert('Failed to update job status: ' + (result.message || result.detail || 'Unknown error'));
                 }
             } catch (error) {
                 console.error('Error updating job status:', error);

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -728,7 +728,7 @@ async def update_job_notes(job_id: str, notes: str):
         )
 
 @app.put("/saved-job/{job_id}/applied")
-async def mark_job_applied(job_id: str, applied: bool):
+async def mark_job_applied(job_id: str, applied: bool = Query(...)):
     """Mark a saved job as applied or not applied"""
     try:
         saved_jobs = load_saved_jobs()
