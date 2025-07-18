@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import json
 import asyncio
 from openai import OpenAI
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -51,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Saved Jobs Storage Management
+SAVED_JOBS_FILE = "saved_jobs.json"
 
 class JobSearchRequest(BaseModel):
     site_name: Optional[List[str]] = ["indeed"]  # Default to Indeed only
@@ -97,6 +101,75 @@ class AIFilterResponse(BaseModel):
     filtered_count: Optional[int] = None
     filtered_jobs: Optional[List[Dict[str, Any]]] = None
     timestamp: str
+
+# Saved Jobs Models
+class SaveJobRequest(BaseModel):
+    job_data: Dict[str, Any]  # The complete job object
+    notes: Optional[str] = ""  # User notes about the job
+
+class SavedJob(BaseModel):
+    id: str
+    job_data: Dict[str, Any]
+    notes: str
+    saved_at: str
+    tags: List[str] = []
+
+class SavedJobResponse(BaseModel):
+    success: bool
+    message: str
+    saved_job: Optional[SavedJob] = None
+
+class SavedJobsListResponse(BaseModel):
+    success: bool
+    message: str
+    saved_jobs: List[SavedJob]
+    total_count: int
+    timestamp: str
+
+# Saved Jobs Utility Functions (defined after models)
+def load_saved_jobs() -> List[SavedJob]:
+    """Load saved jobs from JSON file"""
+    try:
+        if os.path.exists(SAVED_JOBS_FILE):
+            with open(SAVED_JOBS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return [SavedJob(**job) for job in data]
+        return []
+    except Exception as e:
+        print(f"Error loading saved jobs: {e}")
+        return []
+
+def save_jobs_to_file(saved_jobs: List[SavedJob]):
+    """Save jobs list to JSON file"""
+    try:
+        data = [job.dict() for job in saved_jobs]
+        with open(SAVED_JOBS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving jobs to file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save jobs: {str(e)}")
+
+def job_already_saved(job_data: Dict[str, Any], saved_jobs: List[SavedJob]) -> bool:
+    """Check if a job is already saved based on job URL or title+company combination"""
+    job_url = job_data.get('job_url', '')
+    job_title = job_data.get('title', '').lower().strip()
+    job_company = job_data.get('company', '').lower().strip()
+    
+    for saved_job in saved_jobs:
+        saved_url = saved_job.job_data.get('job_url', '')
+        saved_title = saved_job.job_data.get('title', '').lower().strip()
+        saved_company = saved_job.job_data.get('company', '').lower().strip()
+        
+        # Check by URL first (most reliable)
+        if job_url and saved_url and job_url == saved_url:
+            return True
+            
+        # Check by title + company combination
+        if job_title and job_company and saved_title and saved_company:
+            if job_title == saved_title and job_company == saved_company:
+                return True
+    
+    return False
 
 @app.get("/")
 async def root():
@@ -509,6 +582,139 @@ async def ai_filter_jobs(request: AIFilterRequest, http_request: Request):
         raise HTTPException(
             status_code=500,
             detail=f"Error in AI filtering: {str(e)}"
+        )
+
+# Saved Jobs Endpoints
+
+@app.post("/save-job", response_model=SavedJobResponse)
+async def save_job(request: SaveJobRequest):
+    """Save a job to the user's collection"""
+    try:
+        # Load current saved jobs
+        saved_jobs = load_saved_jobs()
+        
+        # Check if job is already saved
+        if job_already_saved(request.job_data, saved_jobs):
+            return SavedJobResponse(
+                success=False,
+                message="Job is already saved to your collection"
+            )
+        
+        # Create new saved job
+        new_saved_job = SavedJob(
+            id=str(uuid.uuid4()),
+            job_data=request.job_data,
+            notes=request.notes,
+            saved_at=datetime.now().isoformat(),
+            tags=[]
+        )
+        
+        # Add to list and save
+        saved_jobs.append(new_saved_job)
+        save_jobs_to_file(saved_jobs)
+        
+        return SavedJobResponse(
+            success=True,
+            message="Job saved successfully",
+            saved_job=new_saved_job
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error saving job: {str(e)}"
+        )
+
+@app.get("/saved-jobs", response_model=SavedJobsListResponse)
+async def get_saved_jobs():
+    """Get all saved jobs"""
+    try:
+        saved_jobs = load_saved_jobs()
+        
+        # Sort by saved_at date (newest first)
+        saved_jobs.sort(key=lambda x: x.saved_at, reverse=True)
+        
+        return SavedJobsListResponse(
+            success=True,
+            message=f"Retrieved {len(saved_jobs)} saved jobs",
+            saved_jobs=saved_jobs,
+            total_count=len(saved_jobs),
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving saved jobs: {str(e)}"
+        )
+
+@app.delete("/saved-job/{job_id}")
+async def delete_saved_job(job_id: str):
+    """Delete a saved job by ID"""
+    try:
+        saved_jobs = load_saved_jobs()
+        
+        # Find and remove the job
+        original_count = len(saved_jobs)
+        saved_jobs = [job for job in saved_jobs if job.id != job_id]
+        
+        if len(saved_jobs) == original_count:
+            raise HTTPException(
+                status_code=404,
+                detail="Saved job not found"
+            )
+        
+        # Save updated list
+        save_jobs_to_file(saved_jobs)
+        
+        return {
+            "success": True,
+            "message": "Job removed from saved collection",
+            "remaining_count": len(saved_jobs)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting saved job: {str(e)}"
+        )
+
+@app.put("/saved-job/{job_id}/notes")
+async def update_job_notes(job_id: str, notes: str):
+    """Update notes for a saved job"""
+    try:
+        saved_jobs = load_saved_jobs()
+        
+        # Find and update the job
+        job_found = False
+        for job in saved_jobs:
+            if job.id == job_id:
+                job.notes = notes
+                job_found = True
+                break
+        
+        if not job_found:
+            raise HTTPException(
+                status_code=404,
+                detail="Saved job not found"
+            )
+        
+        # Save updated list
+        save_jobs_to_file(saved_jobs)
+        
+        return {
+            "success": True,
+            "message": "Job notes updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating job notes: {str(e)}"
         )
 
 @app.get("/health")
